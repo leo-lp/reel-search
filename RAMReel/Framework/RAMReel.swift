@@ -97,6 +97,7 @@ open class RAMReel
     let reactor: TextFieldReactor<DataSource, CollectionWrapperClass>
     let textField: TextFieldClass
     let returnTarget: TextFieldTarget
+    private var untouchedTarget : TextFieldTarget? = nil
     let gestureTarget: GestureTarget
     let dataFlow: DataFlow<DataSource, CollectionViewWrapper<CellClass.DataType, CellClass>>
     
@@ -202,13 +203,14 @@ open class RAMReel
         let size = self.textField.textRect(forBounds: textField.bounds).height * themeFont.pointSize / themeFont.lineHeight * 0.8
         let font = (size > 0) ? (UIFont(name: themeFont.fontName, size: size) ?? themeFont) : themeFont
         self.textField.attributedPlaceholder = NSAttributedString(string: placeholder, attributes: [
-            NSFontAttributeName: font,
-            NSForegroundColorAttributeName: self.theme.textColor.withAlphaComponent(0.5)
+            NSAttributedStringKey.font: font,
+            NSAttributedStringKey.foregroundColor: self.theme.textColor.withAlphaComponent(0.5)
             ])
     }
     
     var bottomConstraints: [NSLayoutConstraint] = []
     let keyboardCallbackWrapper: NotificationCallbackWrapper
+    let attemptToDodgeKeyboard : Bool
     
     // MARK: Initialization
     /**
@@ -219,12 +221,16 @@ open class RAMReel
         - dataSource: Object of type that implements FlowDataSource protocol
         - placeholder: Optional text field placeholder
         - hook: Optional initial value change hook
+        - attemptToDodgeKeyboard: attempt to center the widget on the available screen area when the iOS
+              keyboard appears (will cause issues if the widget isn't being used in full screen)
     */
-    public init(frame: CGRect, dataSource: DataSource, placeholder: String = "", hook: HookType? = nil) {
+    public init(frame: CGRect, dataSource: DataSource, placeholder: String = "", attemptToDodgeKeyboard: Bool, hook: HookType? = nil) {
         self.view = UIView(frame: frame)
         self.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         self.view.translatesAutoresizingMaskIntoConstraints = true
         self.dataSource = dataSource
+        
+        self.attemptToDodgeKeyboard = attemptToDodgeKeyboard
         
         if let h = hook {
             self.hooks.append(h)
@@ -276,7 +282,7 @@ open class RAMReel
             }
         }
         
-        gestureTarget.recognizeFor(collectionView, type: GestureTarget.GestureType.tap) { [weak self] _ in
+        gestureTarget.recognizeFor(collectionView, type: GestureTarget.GestureType.tap) { [weak self] _, _ in
             if
                 let `self` = self,
                 let selectedItem = self.wrapper.selectedItem
@@ -288,6 +294,10 @@ open class RAMReel
         }
         
         gestureTarget.recognizeFor(collectionView, type: GestureTarget.GestureType.swipe) { _,_ in }
+        
+        weak var s = self
+        
+        self.untouchedTarget = TextFieldTarget(controlEvents: UIControlEvents.editingChanged, textField: self.textField, hook: {_ in s?.placeholder = "";})
         
         self.keyboardCallbackWrapper.callback = keyboard
         
@@ -306,7 +316,7 @@ open class RAMReel
         updatePlaceholder(self.placeholder)
     }
     
-    /// If you use `RAMReel` to enter set of values from the list call this method before each input.
+    /// If you use `RAMReel` to enter a set of values from the list call this method before each input.
     open func prepareForReuse() {
         self.textField.text = ""
         self.dataFlow.transport("")
@@ -346,6 +356,7 @@ open class RAMReel
             let animDuration: TimeInterval = userInfo[UIKeyboardAnimationDurationUserInfoKey]?.doubleValue,
             let animCurveRaw = userInfo[UIKeyboardAnimationCurveUserInfoKey]?.uintValue
         {
+            if(attemptToDodgeKeyboard){
             let animCurve = UIViewAnimationOptions(rawValue: UInt(animCurveRaw))
                 
             for bottomConstraint in self.bottomConstraints {
@@ -359,6 +370,7 @@ open class RAMReel
                     self.gradientView.layer.frame.size.height = endFrame.origin.y
                     self.textField.layoutIfNeeded()
                 }, completion: nil)
+            }
         }
     }
     
@@ -368,7 +380,7 @@ open class RAMReel
 
 class NotificationCallbackWrapper: NSObject {
     
-    func callItBack(_ notification: Notification) {
+    @objc func callItBack(_ notification: Notification) {
         callback?(notification)
     }
     
@@ -438,7 +450,7 @@ final class GestureTarget: NSObject, UIGestureRecognizerDelegate {
         }
     }
     
-    func gesture(_ gestureRecognizer: UIGestureRecognizer) {
+    @objc func gesture(_ gestureRecognizer: UIGestureRecognizer) {
         if let (textField, hook) = hooks[gestureRecognizer] {
             hook(textField, gestureRecognizer)
         }
